@@ -1,0 +1,104 @@
+@page "/alerts"
+@rendermode InteractiveServer
+@inject DrugApiService DrugApi
+
+<PageTitle>库存预警 - 药品管理综合系统</PageTitle>
+
+<div class="page-header">
+    <h1>智能库存预警看板</h1>
+    <p class="page-subtitle">监控库存低于安全线（200）的紧缺药品</p>
+</div>
+
+@if (_loadError != null)
+{
+    <div class="alert alert-error">@_loadError</div>
+}
+else if (_loading)
+{
+    <div class="loading-state">
+        <div class="spinner"></div>
+        <span>正在加载预警数据...</span>
+    </div>
+}
+else
+{
+    <div class="alert-stat-card">
+        <div class="stat-number">@_lowStockDrugs.Count</div>
+        <div class="stat-info">
+            <h2>低库存药品种类</h2>
+            <p>库存低于 200 的药品需及时补货，请通知采购人员处理。</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header toolbar">
+            <h2>预警明细</h2>
+            <button class="btn btn-secondary btn-sm" @onclick="LoadAlerts">刷新</button>
+        </div>
+        <div class="card-body table-wrapper">
+            @if (!_lowStockDrugs.Any())
+            {
+                <div class="empty-state success-state">
+                    <span class="empty-icon">✓</span>
+                    当前无低库存药品，库存状况良好
+                </div>
+            }
+            else
+            {
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>药品名称</th>
+                            <th>规格</th>
+                            <th>当前库存</th>
+                            <th>供应商 ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var drug in _lowStockDrugs)
+                        {
+                            <tr class="row-low-stock">
+                                <td>@drug.DrugName</td>
+                                <td>@drug.Specification</td>
+                                <td class="text-danger fw-bold">@drug.StockQuantity</td>
+                                <td>@drug.SupplierId</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private List<DrugCatalogEntity> _lowStockDrugs = new();
+    private bool _loading = true;
+    private string? _loadError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAlerts();
+    }
+
+    private async Task LoadAlerts()
+    {
+        _loading = true;
+        _loadError = null;
+        StateHasChanged();
+
+        try
+        {
+            _lowStockDrugs = await DrugApi.GetLowStockDrugsAsync(200);
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"无法加载预警数据，请确认 WebAPI 已在 http://localhost:5246 运行。详情：{ex.Message}";
+            _lowStockDrugs = new List<DrugCatalogEntity>();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}
