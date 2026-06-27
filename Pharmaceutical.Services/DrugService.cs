@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.EntityFrameworkCore;
 
 namespace Pharmaceutical.Services
 {
@@ -50,22 +51,63 @@ namespace Pharmaceutical.Services
         }
 
         /// <summary>
-        /// 新增药品（带缓存双写一致性策略）
+        /// 新增药品（带 MySQL 异常捕获与 Redis 缓存双写一致性策略）
         /// </summary>
         public async Task<bool> AddDrugAsync(DrugCatalogEntity drug)
         {
-            if (string.IsNullOrWhiteSpace(drug.DrugName)) return false;
+            // 1. 基础防错校验
+            if (drug == null || string.IsNullOrWhiteSpace(drug.DrugName)) return false;
 
-            await _context.Drugs.AddAsync(drug);
-            var result = await _context.SaveChangesAsync() > 0;
-
-            if (result)
+            try
             {
-                // 核心安全策略：数据库变更了，直接删除旧缓存（清空旧缓存，下次查询自动更新）
-                await _cache.RemoveAsync(CacheKey);
-            }
+                // 2. 写入 MySQL 数据库
+                await _context.Drugs.AddAsync(drug);
+                var result = await _context.SaveChangesAsync() > 0;
 
-            return result;
+                // 3. 如果数据库写入成功，立刻斩断 Redis 旧缓存
+                if (result)
+                {
+                    try
+                    {
+                        // 核心安全策略：清空旧缓存，下次前端查询时会自动穿透并更新
+                        await _cache.RemoveAsync("AllDrugs");
+                    }
+                    catch (Exception cacheEx)
+                    {
+                        // Redis 如果报错，记录日志但不阻止整个业务（高可用降级）
+                        Console.WriteLine($"[Redis 缓存清理异常]: {cacheEx.Message}");
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                // 4. 捕获 MySQL 写入异常（如主键冲突、字段超长等）
+                Console.WriteLine($"[MySQL 写入异常]: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 从 MySQL 删除指定药品
+        /// </summary>
+        public async Task<bool> DeleteDrugAsync(string drugId)
+        {
+            try
+            {
+                var drug = await _context.Drugs.FirstOrDefaultAsync(x => x.DrugId == drugId);
+                if (drug == null) return false;
+
+                _context.Drugs.Remove(drug);
+                var rows = await _context.SaveChangesAsync();
+                return rows > 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MySQL 删除异常]: {ex.Message}");
+                return false;
+            }
         }
     }
 }
