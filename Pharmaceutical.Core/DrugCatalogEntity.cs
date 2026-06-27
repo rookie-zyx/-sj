@@ -4,44 +4,44 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Pharmaceutical.Core
 {
-    // ✅ 1. 强制将实体映射到数据库里真实的表名 'drugs'，而不是默认的 't_drug_catalog'
+    // ✅ 强制将实体映射到数据库里真实的表名 'drugs'
     [Table("drugs")]
     public class DrugCatalogEntity
     {
-        // ✅ 2. 主键是字符串类型的药品编号 (如 'H20203021')，对齐数据库中的 drug_id
+        // ✅ 主键对齐数据库中的 drug_id
         [Key]
         [Column("drug_id")]
-        public string DrugId { get; set; }
+        public string DrugId { get; set; } = null!; 
 
         [Required]
         [Column("drug_name")]
-        public string DrugName { get; set; }
+        public string DrugName { get; set; } = null!; 
 
         [Column("trade_name")]
-        public string TradeName { get; set; } // 商品名
+        public string TradeName { get; set; } = null!; 
 
         [Column("specification")]
-        public string Specification { get; set; } // 规格
+        public string Specification { get; set; } = null!; 
 
         [Column("dosage_form")]
-        public string DosageForm { get; set; } // 剂型
+        public string DosageForm { get; set; } = null!; 
 
         [Column("approval_num")]
-        public string ApprovalNum { get; set; } // 批准文号
+        public string ApprovalNum { get; set; } = null!; 
 
         [Column("storage_cond")]
-        public string StorageCond { get; set; } // 储存条件
+        public string StorageCond { get; set; } = null!; 
 
         [Column("purchase_price")]
-        public decimal PurchasePrice { get; set; } // 采购价
+        public decimal PurchasePrice { get; set; } 
 
         [Column("retail_price")]
-        public decimal RetailPrice { get; set; } // 零售价
+        public decimal RetailPrice { get; set; }
 
         [Column("stock_quantity")]
-        public int StockQuantity { get; set; } // 当前库存数量
+        public int StockQuantity { get; set; } 
 
         [Column("supplier_id")]
-        public int SupplierId { get; set; } // 供应商ID
+        public int SupplierId { get; set; }
     }
 }
