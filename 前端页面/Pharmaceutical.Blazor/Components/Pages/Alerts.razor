@@ -1,12 +1,13 @@
 @page "/alerts"
 @rendermode InteractiveServer
 @inject DrugApiService DrugApi
+@inject IOptions<PharmacySettings> PharmacyOptions
 
 <PageTitle>库存预警 - 药品管理综合系统</PageTitle>
 
 <div class="page-header">
     <h1>智能库存预警看板</h1>
-    <p class="page-subtitle">监控库存低于安全线（200）的紧缺药品</p>
+    <p class="page-subtitle">监控库存低于安全线（@PharmacyOptions.Value.LowStockThreshold）的紧缺药品</p>
 </div>
 
 @if (_loadError != null)
@@ -26,7 +27,7 @@ else
         <div class="stat-number">@_lowStockDrugs.Count</div>
         <div class="stat-info">
             <h2>低库存药品种类</h2>
-            <p>库存低于 200 的药品需及时补货，请通知采购人员处理。</p>
+            <p>库存低于 @PharmacyOptions.Value.LowStockThreshold 的药品需及时补货，请通知采购人员处理。</p>
         </div>
     </div>
 
@@ -89,11 +90,11 @@ else
 
         try
         {
-            _lowStockDrugs = await DrugApi.GetLowStockDrugsAsync(200);
+            _lowStockDrugs = await DrugApi.GetLowStockDrugsAsync();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _loadError = $"无法加载预警数据，请确认 WebAPI 已在 http://localhost:5246 运行。详情：{ex.Message}";
+            _loadError = "无法加载预警数据，请确认 WebAPI 已启动且 ApiSettings:BaseUrl 配置正确。";
             _lowStockDrugs = new List<DrugCatalogEntity>();
         }
         finally

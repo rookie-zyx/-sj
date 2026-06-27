@@ -1,47 +1,58 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.EntityFrameworkCore;
+using Pharmaceutical.Core;
 using Pharmaceutical.Infrastructure;
 using Pharmaceutical.Services;
+using Pharmaceutical.WebAPI.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
 builder.Services.AddControllers();
+builder.Services.Configure<PharmacySettings>(
+    builder.Configuration.GetSection(PharmacySettings.SectionName));
 
-// ==================== 【新加的核心代码段】 ====================
-// 1. 读取 appsettings.json 中的 MySQL 连接字符串
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection 未配置。");
 
-// 2. 将 EF Core 数据库上下文注入到容器中（注意补上你本地 appsettings.json 里的密码）
+var mysqlVersion = builder.Configuration["Database:ServerVersion"] ?? "8.0.36";
 builder.Services.AddDbContext<PharmaceuticalDbContext>(options =>
-    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
-// 注册 Redis 分布式缓存服务
+    options.UseMySql(connectionString, new MySqlServerVersion(Version.Parse(mysqlVersion))));
+
 builder.Services.AddStackExchangeRedisCache(options =>
 {
     options.Configuration = builder.Configuration.GetConnectionString("RedisConnection");
-    options.InstanceName = "Pharmacy_"; // 缓存 Key 的前缀，防止多系统冲突
+    options.InstanceName = "Pharmacy_";
 });
-// 3. 将你的业务层 DrugService 注入到容器中，这样 Controller 才能正常调用它
-builder.Services.AddScoped<DrugService>();
-// ==============================================================
 
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddScoped<DrugService>();
+
+builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
+        ApiKeyAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthorization();
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
+else
+{
+    app.UseExceptionHandler("/error");
+    app.UseHsts();
+}
 
 app.UseHttpsRedirection();
-
+app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
+
+app.MapGet("/error", () => Results.Problem("服务器内部错误，请稍后重试。"))
+    .ExcludeFromDescription();
 
 app.Run();

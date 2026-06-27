@@ -1,113 +1,158 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 using Pharmaceutical.Core;
 using Pharmaceutical.Infrastructure;
-using System;
-using System.Collections.Generic;
-using System.Text.Json;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 
-namespace Pharmaceutical.Services
+namespace Pharmaceutical.Services;
+
+public class DrugService
 {
-    public class DrugService
+    private readonly PharmaceuticalDbContext _context;
+    private readonly IDistributedCache _cache;
+    private readonly ILogger<DrugService> _logger;
+    private const string CacheKey = "AllDrugs";
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+
+    public DrugService(
+        PharmaceuticalDbContext context,
+        IDistributedCache cache,
+        ILogger<DrugService> logger)
     {
-        private readonly PharmaceuticalDbContext _context;
-        private readonly IDistributedCache _cache; // 注入分布式缓存接口
-        private const string CacheKey = "AllDrugs";
+        _context = context;
+        _cache = cache;
+        _logger = logger;
+    }
 
-        public DrugService(PharmaceuticalDbContext context, IDistributedCache cache)
+    public async Task<List<DrugCatalogEntity>> GetAllDrugsAsync()
+    {
+        try
         {
-            _context = context;
-            _cache = cache;
-        }
-
-        /// <summary>
-        /// 获取所有药品列表（Redis 缓存防线版）
-        /// </summary>
-        public async Task<List<DrugCatalogEntity>> GetAllDrugsAsync()
-        {
-            // 1. 尝试从 Redis 缓存中读取数据
             var cachedData = await _cache.GetStringAsync(CacheKey);
             if (!string.IsNullOrEmpty(cachedData))
             {
-                // 缓存命中：直接反序列化返回，不查数据库！
-                return JsonSerializer.Deserialize<List<DrugCatalogEntity>>(cachedData) ?? new List<DrugCatalogEntity>();
+                return JsonSerializer.Deserialize<List<DrugCatalogEntity>>(cachedData)
+                    ?? new List<DrugCatalogEntity>();
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Redis 读取失败，降级至 MySQL 查询");
+        }
 
-            // 2. 缓存未命中：穿透到 MySQL 数据库查询
-            var drugs = await _context.Drugs.ToListAsync();
+        var drugs = await _context.Drugs.AsNoTracking().ToListAsync();
 
-            // 3. 将查询结果写入 Redis，并设置 5 分钟的过期时间（防止数据永久积压）
+        try
+        {
             var cacheOptions = new DistributedCacheEntryOptions
             {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+                AbsoluteExpirationRelativeToNow = CacheDuration
             };
-
-            var serializedData = JsonSerializer.Serialize(drugs);
-            await _cache.SetStringAsync(CacheKey, serializedData, cacheOptions);
-
-            return drugs;
+            await _cache.SetStringAsync(CacheKey, JsonSerializer.Serialize(drugs), cacheOptions);
         }
-
-        /// <summary>
-        /// 新增药品（带 MySQL 异常捕获与 Redis 缓存双写一致性策略）
-        /// </summary>
-        public async Task<bool> AddDrugAsync(DrugCatalogEntity drug)
+        catch (Exception ex)
         {
-            // 1. 基础防错校验
-            if (drug == null || string.IsNullOrWhiteSpace(drug.DrugName)) return false;
-
-            try
-            {
-                // 2. 写入 MySQL 数据库
-                await _context.Drugs.AddAsync(drug);
-                var result = await _context.SaveChangesAsync() > 0;
-
-                // 3. 如果数据库写入成功，立刻斩断 Redis 旧缓存
-                if (result)
-                {
-                    try
-                    {
-                        // 核心安全策略：清空旧缓存，下次前端查询时会自动穿透并更新
-                        await _cache.RemoveAsync("AllDrugs");
-                    }
-                    catch (Exception cacheEx)
-                    {
-                        // Redis 如果报错，记录日志但不阻止整个业务（高可用降级）
-                        Console.WriteLine($"[Redis 缓存清理异常]: {cacheEx.Message}");
-                    }
-                }
-
-                return result;
-            }
-            catch (Exception ex)
-            {
-                // 4. 捕获 MySQL 写入异常（如主键冲突、字段超长等）
-                Console.WriteLine($"[MySQL 写入异常]: {ex.Message}");
-                return false;
-            }
+            _logger.LogWarning(ex, "Redis 写入失败，仅返回数据库结果");
         }
 
-        /// <summary>
-        /// 从 MySQL 删除指定药品
-        /// </summary>
-        public async Task<bool> DeleteDrugAsync(string drugId)
+        return drugs;
+    }
+
+    public async Task<List<DrugCatalogEntity>> GetLowStockDrugsAsync(int threshold)
+    {
+        var drugs = await GetAllDrugsAsync();
+        return drugs.Where(d => d.StockQuantity < threshold).ToList();
+    }
+
+    public async Task<DrugOperationResult> AddDrugAsync(DrugCatalogEntity drug)
+    {
+        if (drug == null
+            || string.IsNullOrWhiteSpace(drug.DrugId)
+            || string.IsNullOrWhiteSpace(drug.DrugName))
         {
-            try
-            {
-                var drug = await _context.Drugs.FirstOrDefaultAsync(x => x.DrugId == drugId);
-                if (drug == null) return false;
-
-                _context.Drugs.Remove(drug);
-                var rows = await _context.SaveChangesAsync();
-                return rows > 0;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[MySQL 删除异常]: {ex.Message}");
-                return false;
-            }
+            return DrugOperationResult.Fail("药品编号和名称不能为空", DrugOperationError.ValidationFailed);
         }
+
+        if (drug.PurchasePrice < 0 || drug.RetailPrice < 0 || drug.StockQuantity < 0)
+        {
+            return DrugOperationResult.Fail("价格或库存不能为负数", DrugOperationError.ValidationFailed);
+        }
+
+        if (drug.SupplierId <= 0)
+        {
+            return DrugOperationResult.Fail("供应商 ID 必须大于 0", DrugOperationError.ValidationFailed);
+        }
+
+        try
+        {
+            var exists = await _context.Drugs.AnyAsync(x => x.DrugId == drug.DrugId);
+            if (exists)
+            {
+                return DrugOperationResult.Fail($"药品编号 {drug.DrugId} 已存在", DrugOperationError.DuplicateKey);
+            }
+
+            await _context.Drugs.AddAsync(drug);
+            await _context.SaveChangesAsync();
+            await InvalidateCacheAsync();
+
+            return DrugOperationResult.Ok("药品录入成功");
+        }
+        catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+        {
+            _logger.LogWarning(ex, "药品编号重复: {DrugId}", drug.DrugId);
+            return DrugOperationResult.Fail($"药品编号 {drug.DrugId} 已存在", DrugOperationError.DuplicateKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "新增药品失败: {DrugId}", drug.DrugId);
+            return DrugOperationResult.Fail("数据库写入失败", DrugOperationError.DatabaseError);
+        }
+    }
+
+    public async Task<DrugOperationResult> DeleteDrugAsync(string drugId)
+    {
+        if (string.IsNullOrWhiteSpace(drugId))
+        {
+            return DrugOperationResult.Fail("药品编号不能为空", DrugOperationError.ValidationFailed);
+        }
+
+        try
+        {
+            var drug = await _context.Drugs.FirstOrDefaultAsync(x => x.DrugId == drugId);
+            if (drug == null)
+            {
+                return DrugOperationResult.Fail($"未找到编号为 {drugId} 的药品", DrugOperationError.NotFound);
+            }
+
+            _context.Drugs.Remove(drug);
+            await _context.SaveChangesAsync();
+            await InvalidateCacheAsync();
+
+            return DrugOperationResult.Ok("药品下架成功");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "删除药品失败: {DrugId}", drugId);
+            return DrugOperationResult.Fail("删除操作失败", DrugOperationError.DatabaseError);
+        }
+    }
+
+    private async Task InvalidateCacheAsync()
+    {
+        try
+        {
+            await _cache.RemoveAsync(CacheKey);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Redis 缓存清理失败");
+        }
+    }
+
+    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    {
+        var message = ex.InnerException?.Message ?? ex.Message;
+        return message.Contains("Duplicate", StringComparison.OrdinalIgnoreCase);
     }
 }
