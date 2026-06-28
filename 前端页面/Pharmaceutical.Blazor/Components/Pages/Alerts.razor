@@ -1,13 +1,12 @@
 @page "/alerts"
 @rendermode InteractiveServer
 @inject DrugApiService DrugApi
-@inject IOptions<PharmacySettings> PharmacyOptions
 
 <PageTitle>库存预警 - 药品管理综合系统</PageTitle>
 
 <div class="page-header">
     <h1>智能库存预警看板</h1>
-    <p class="page-subtitle">监控库存低于安全线（@PharmacyOptions.Value.LowStockThreshold）的紧缺药品</p>
+    <p class="page-subtitle">监控库存低于安全线（@_threshold）的紧缺药品</p>
 </div>
 
 @if (_loadError != null)
@@ -16,10 +15,7 @@
 }
 else if (_loading)
 {
-    <div class="loading-state">
-        <div class="spinner"></div>
-        <span>正在加载预警数据...</span>
-    </div>
+    <LoadingSpinner IsLoading="true" Text="正在加载预警数据..." />
 }
 else
 {
@@ -27,7 +23,7 @@ else
         <div class="stat-number">@_lowStockDrugs.Count</div>
         <div class="stat-info">
             <h2>低库存药品种类</h2>
-            <p>库存低于 @PharmacyOptions.Value.LowStockThreshold 的药品需及时补货，请通知采购人员处理。</p>
+            <p>库存低于 @_threshold 的药品需及时补货，请通知采购人员处理。</p>
         </div>
     </div>
 
@@ -73,14 +69,12 @@ else
 }
 
 @code {
-    private List<DrugCatalogEntity> _lowStockDrugs = new();
+    private List<DrugDto> _lowStockDrugs = new();
     private bool _loading = true;
     private string? _loadError;
+    private int _threshold = 200;
 
-    protected override async Task OnInitializedAsync()
-    {
-        await LoadAlerts();
-    }
+    protected override async Task OnInitializedAsync() => await LoadAlerts();
 
     private async Task LoadAlerts()
     {
@@ -90,12 +84,14 @@ else
 
         try
         {
-            _lowStockDrugs = await DrugApi.GetLowStockDrugsAsync();
+            var settings = await DrugApi.GetAlertSettingsAsync();
+            if (settings != null) _threshold = settings.LowStockThreshold;
+            _lowStockDrugs = await DrugApi.GetLowStockDrugsAsync(_threshold);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            _loadError = "无法加载预警数据，请确认 WebAPI 已启动且 ApiSettings:BaseUrl 配置正确。";
-            _lowStockDrugs = new List<DrugCatalogEntity>();
+            _loadError = $"无法加载预警数据：{ex.Message}";
+            _lowStockDrugs = new();
         }
         finally
         {

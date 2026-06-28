@@ -1,58 +1,171 @@
-using Microsoft.AspNetCore.Authentication;
+Ôªøusing Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using Pharmaceutical.Core;
+using Pharmaceutical.Core.Interfaces;
+using Pharmaceutical.Core.Settings;
 using Pharmaceutical.Infrastructure;
+using Pharmaceutical.Infrastructure.Repositories;
 using Pharmaceutical.Services;
-using Pharmaceutical.WebAPI.Auth;
+using Pharmaceutical.WebAPI;
+using Pharmaceutical.WebAPI.Middleware;
+using Pharmaceutical.WebAPI.Validators;
+using System.Text;
+using FluentValidation;
+using FluentValidation.AspNetCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
-builder.Services.Configure<PharmacySettings>(
-    builder.Configuration.GetSection(PharmacySettings.SectionName));
+// --- Settings ---
+builder.Services.Configure<JwtSettings>(
+    builder.Configuration.GetSection(JwtSettings.SectionName));
+builder.Services.Configure<AlertSettings>(
+    builder.Configuration.GetSection(AlertSettings.SectionName));
 
+// --- DbContext ---
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection Œ¥≈‰÷√°£");
+    ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 
-var mysqlVersion = builder.Configuration["Database:ServerVersion"] ?? "8.0.36";
+var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
 builder.Services.AddDbContext<PharmaceuticalDbContext>(options =>
-    options.UseMySql(connectionString, new MySqlServerVersion(Version.Parse(mysqlVersion))));
+    options.UseMySql(connectionString, serverVersion));
 
-builder.Services.AddStackExchangeRedisCache(options =>
-{
-    options.Configuration = builder.Configuration.GetConnectionString("RedisConnection");
-    options.InstanceName = "Pharmacy_";
-});
+// --- Identity ---
+builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
+    {
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = false;
+        options.Password.RequiredLength = 6;
+    })
+    .AddEntityFrameworkStores<PharmaceuticalDbContext>()
+    .AddDefaultTokenProviders();
 
-builder.Services.AddScoped<DrugService>();
+// --- JWT Authentication ---
+var jwtSettings = builder.Configuration
+    .GetSection(JwtSettings.SectionName)
+    .Get<JwtSettings>()!;
 
-builder.Services.AddAuthentication(ApiKeyAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>(
-        ApiKeyAuthenticationHandler.SchemeName, _ => { });
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtSettings.Issuer,
+            ValidAudience = jwtSettings.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(jwtSettings.Secret))
+        };
+    });
+
 builder.Services.AddAuthorization();
 
+// --- Redis Cache ---
+var redisConnection = builder.Configuration.GetConnectionString("RedisConnection");
+if (!string.IsNullOrWhiteSpace(redisConnection))
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
+// --- Repositories & Services ---
+builder.Services.AddScoped<IDrugRepository, DrugRepository>();
+builder.Services.AddScoped<IStockRepository, StockRepository>();
+builder.Services.AddScoped<ISupplierRepository, SupplierRepository>();
+builder.Services.AddScoped<IDrugService, DrugService>();
+builder.Services.AddScoped<IStockService, StockService>();
+builder.Services.AddScoped<ISupplierService, SupplierService>();
+
+// --- FluentValidation ---
+builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddValidatorsFromAssemblyContaining<DrugCreateDtoValidator>();
+
+// --- Controllers & Swagger ---
+builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Pharmaceutical Management API",
+        Version = "v1"
+    });
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization header using the Bearer scheme",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// --- Health Checks ---
+builder.Services.AddHealthChecks()
+    .AddMySql(connectionString)
+    .AddRedis(redisConnection ?? "127.0.0.1:6379");
+
+// --- CORS for Blazor client ---
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowBlazor", policy =>
+    {
+        policy.WithOrigins("https://localhost:5100", "http://localhost:5100")
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
+    });
+});
 
 var app = builder.Build();
 
+// --- Database seeding ---
+await DatabaseSeeder.SeedAsync(app.Services);
+
+// --- Middleware pipeline ---
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-else
-{
-    app.UseExceptionHandler("/error");
-    app.UseHsts();
-}
 
-app.UseHttpsRedirection();
+app.UseMiddleware<ExceptionMiddleware>();
+app.UseCors("AllowBlazor");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-
-app.MapGet("/error", () => Results.Problem("∑˛ŒÒ∆˜ƒ⁄≤ø¥ÌŒÛ£¨«Î…‘∫Û÷ÿ ‘°£"))
-    .ExcludeFromDescription();
+app.MapHealthChecks("/health");
 
 app.Run();

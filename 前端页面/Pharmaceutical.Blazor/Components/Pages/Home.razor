@@ -5,30 +5,44 @@
 
 <div class="page-header">
     <h1>药品管理综合系统</h1>
-    <p class="page-subtitle">基于 Blazor Server 与 ASP.NET Core WebAPI 的前后端分离架构</p>
+    <p class="page-subtitle">基于 Blazor Server 与 ASP.NET Core WebAPI 的分层架构</p>
 </div>
 
 <div class="home-cards">
     <a href="/drugs" class="home-card">
         <div class="home-card-icon drugs">☷</div>
-        <h3>药品台账工作台</h3>
-        <p>查看全部药品记录，支持录入新药品、低库存标识与下架操作。</p>
+        <h3>药品台账</h3>
+        <p>录入、编辑、分页搜索与下架药品记录。</p>
         <span class="home-card-link">进入台账 →</span>
     </a>
 
     <a href="/alerts" class="home-card alert-card">
         <div class="home-card-icon alerts">!</div>
-        <h3>库存预警看板</h3>
-        <p>实时监控库存低于 200 的紧缺药品，辅助采购人员及时补货。</p>
+        <h3>库存预警</h3>
+        <p>监控低库存药品，阈值可在 API 配置中调整。</p>
         <span class="home-card-link">查看预警 →</span>
+    </a>
+
+    <a href="/suppliers" class="home-card">
+        <div class="home-card-icon drugs">◎</div>
+        <h3>供应商管理</h3>
+        <p>维护供应商信息，药品录入时可下拉选择。</p>
+        <span class="home-card-link">管理供应商 →</span>
+    </a>
+
+    <a href="/stock" class="home-card">
+        <div class="home-card-icon alerts">↕</div>
+        <h3>入库 / 出库</h3>
+        <p>库存变动与流水查询，事务保证数据一致。</p>
+        <span class="home-card-link">库存操作 →</span>
     </a>
 </div>
 
 <div class="info-panel">
     <h4>系统说明</h4>
     <ul>
-        <li>前端通过 HttpClient 调用 WebAPI（默认 <code>http://localhost:5246</code>）</li>
-        <li>共享 <code>DrugCatalogEntity</code> 实体模型，确保前后端字段一致</li>
-        <li>库存低于 200 的药品将在台账页标红，并在预警看板集中展示</li>
+        <li>WebAPI 默认端口 <code>http://localhost:5246</code>，Blazor 默认 <code>http://localhost:5100</code></li>
+        <li>默认管理员账号 <code>admin</code> / <code>Admin@123</code>，登录后可执行录入与出库操作</li>
+        <li>角色权限：Admin（全部）、Operator（录入/出库）、Viewer（只读）</li>
     </ul>
 </div>

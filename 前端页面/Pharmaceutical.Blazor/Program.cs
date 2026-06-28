@@ -1,30 +1,25 @@
 using Pharmaceutical.Blazor.Components;
 using Pharmaceutical.Blazor.Services;
-using Pharmaceutical.Core;
 
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.Configure<PharmacySettings>(
-    builder.Configuration.GetSection(PharmacySettings.SectionName));
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-builder.Services.AddHttpClient<DrugApiService>((sp, client) =>
-{
-    var configuration = sp.GetRequiredService<IConfiguration>();
-    var baseUrl = configuration["ApiSettings:BaseUrl"]
-        ?? throw new InvalidOperationException("ApiSettings:BaseUrl 未配置。");
+builder.Services.AddScoped<AuthStateService>();
+builder.Services.AddLogging();
+builder.Services.AddTransient<JwtAuthorizationHandler>();
 
-    client.BaseAddress = new Uri(baseUrl);
-    client.Timeout = TimeSpan.FromSeconds(30);
+var apiBaseUrl = builder.Configuration["ApiSettings:BaseUrl"]
+    ?? throw new InvalidOperationException("ApiSettings:BaseUrl is not configured.");
 
-    var apiKey = configuration["ApiSettings:ApiKey"];
-    if (!string.IsNullOrWhiteSpace(apiKey))
-    {
-        client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
-    }
-});
+builder.Services.AddHttpClient<AuthApiService>(client => client.BaseAddress = new Uri(apiBaseUrl));
+builder.Services.AddHttpClient<DrugApiService>(client => client.BaseAddress = new Uri(apiBaseUrl))
+    .AddHttpMessageHandler<JwtAuthorizationHandler>();
+builder.Services.AddHttpClient<SupplierApiService>(client => client.BaseAddress = new Uri(apiBaseUrl))
+    .AddHttpMessageHandler<JwtAuthorizationHandler>();
+builder.Services.AddHttpClient<StockApiService>(client => client.BaseAddress = new Uri(apiBaseUrl))
+    .AddHttpMessageHandler<JwtAuthorizationHandler>();
 
 var app = builder.Build();
 

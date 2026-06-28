@@ -1,140 +1,134 @@
-﻿using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Distributed;
+﻿using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
 using Pharmaceutical.Core;
-using Pharmaceutical.Infrastructure;
+using Pharmaceutical.Core.DTOs;
+using Pharmaceutical.Core.Interfaces;
+using System.Text.Json;
 
 namespace Pharmaceutical.Services;
 
-public class DrugService
+public class DrugService : IDrugService
 {
-    private readonly PharmaceuticalDbContext _context;
+    private readonly IDrugRepository _repository;
     private readonly IDistributedCache _cache;
     private readonly ILogger<DrugService> _logger;
     private const string CacheKey = "AllDrugs";
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
-    public DrugService(
-        PharmaceuticalDbContext context,
-        IDistributedCache cache,
-        ILogger<DrugService> logger)
+    public DrugService(IDrugRepository repository, IDistributedCache cache, ILogger<DrugService> logger)
     {
-        _context = context;
+        _repository = repository;
         _cache = cache;
         _logger = logger;
     }
 
-    public async Task<List<DrugCatalogEntity>> GetAllDrugsAsync()
+    public async Task<PagedResult<DrugDto>> GetPagedAsync(string? search, int page, int pageSize)
     {
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
+
+        var result = await _repository.GetPagedAsync(search, page, pageSize);
+        return new PagedResult<DrugDto>
+        {
+            Items = result.Items.Select(MapToDto).ToList(),
+            TotalCount = result.TotalCount,
+            Page = result.Page,
+            PageSize = result.PageSize
+        };
+    }
+
+    public async Task<DrugDto?> GetByIdAsync(string drugId)
+    {
+        var drug = await _repository.GetByIdAsync(drugId);
+        return drug == null ? null : MapToDto(drug);
+    }
+
+    public async Task<List<DrugDto>> GetLowStockAsync(int threshold)
+    {
+        var drugs = await _repository.GetLowStockAsync(threshold);
+        return drugs.Select(MapToDto).ToList();
+    }
+
+    public async Task<bool> AddAsync(DrugCreateDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.DrugId) || string.IsNullOrWhiteSpace(dto.DrugName))
+            return false;
+
+        var entity = new DrugCatalogEntity
+        {
+            DrugId = dto.DrugId.Trim(),
+            DrugName = dto.DrugName.Trim(),
+            TradeName = dto.TradeName ?? string.Empty,
+            Specification = dto.Specification ?? string.Empty,
+            DosageForm = dto.DosageForm ?? string.Empty,
+            ApprovalNum = dto.ApprovalNum ?? string.Empty,
+            StorageCond = dto.StorageCond ?? string.Empty,
+            PurchasePrice = dto.PurchasePrice,
+            RetailPrice = dto.RetailPrice,
+            StockQuantity = dto.StockQuantity,
+            SupplierId = dto.SupplierId
+        };
+
         try
         {
-            var cachedData = await _cache.GetStringAsync(CacheKey);
-            if (!string.IsNullOrEmpty(cachedData))
-            {
-                return JsonSerializer.Deserialize<List<DrugCatalogEntity>>(cachedData)
-                    ?? new List<DrugCatalogEntity>();
-            }
+            var result = await _repository.AddAsync(entity);
+            if (result) await InvalidateCacheAsync();
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Redis 读取失败，降级至 MySQL 查询");
+            _logger.LogError(ex, "新增药品失败: {DrugId}", dto.DrugId);
+            return false;
         }
+    }
 
-        var drugs = await _context.Drugs.AsNoTracking().ToListAsync();
+    public async Task<bool> UpdateAsync(string drugId, DrugUpdateDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.DrugName)) return false;
+
+        var entity = await _repository.GetByIdAsync(drugId);
+        if (entity == null) return false;
+
+        entity.DrugName = dto.DrugName.Trim();
+        entity.TradeName = dto.TradeName ?? string.Empty;
+        entity.Specification = dto.Specification ?? string.Empty;
+        entity.DosageForm = dto.DosageForm ?? string.Empty;
+        entity.ApprovalNum = dto.ApprovalNum ?? string.Empty;
+        entity.StorageCond = dto.StorageCond ?? string.Empty;
+        entity.PurchasePrice = dto.PurchasePrice;
+        entity.RetailPrice = dto.RetailPrice;
+        entity.StockQuantity = dto.StockQuantity;
+        entity.SupplierId = dto.SupplierId;
 
         try
         {
-            var cacheOptions = new DistributedCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = CacheDuration
-            };
-            await _cache.SetStringAsync(CacheKey, JsonSerializer.Serialize(drugs), cacheOptions);
+            var result = await _repository.UpdateAsync(entity);
+            if (result) await InvalidateCacheAsync();
+            return result;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Redis 写入失败，仅返回数据库结果");
+            _logger.LogError(ex, "更新药品失败: {DrugId}", drugId);
+            return false;
         }
-
-        return drugs;
     }
 
-    public async Task<List<DrugCatalogEntity>> GetLowStockDrugsAsync(int threshold)
+    public async Task<bool> DeleteAsync(string drugId)
     {
-        var drugs = await GetAllDrugsAsync();
-        return drugs.Where(d => d.StockQuantity < threshold).ToList();
-    }
-
-    public async Task<DrugOperationResult> AddDrugAsync(DrugCatalogEntity drug)
-    {
-        if (drug == null
-            || string.IsNullOrWhiteSpace(drug.DrugId)
-            || string.IsNullOrWhiteSpace(drug.DrugName))
-        {
-            return DrugOperationResult.Fail("药品编号和名称不能为空", DrugOperationError.ValidationFailed);
-        }
-
-        if (drug.PurchasePrice < 0 || drug.RetailPrice < 0 || drug.StockQuantity < 0)
-        {
-            return DrugOperationResult.Fail("价格或库存不能为负数", DrugOperationError.ValidationFailed);
-        }
-
-        if (drug.SupplierId <= 0)
-        {
-            return DrugOperationResult.Fail("供应商 ID 必须大于 0", DrugOperationError.ValidationFailed);
-        }
-
         try
         {
-            var exists = await _context.Drugs.AnyAsync(x => x.DrugId == drug.DrugId);
-            if (exists)
-            {
-                return DrugOperationResult.Fail($"药品编号 {drug.DrugId} 已存在", DrugOperationError.DuplicateKey);
-            }
-
-            await _context.Drugs.AddAsync(drug);
-            await _context.SaveChangesAsync();
-            await InvalidateCacheAsync();
-
-            return DrugOperationResult.Ok("药品录入成功");
+            var result = await _repository.DeleteAsync(drugId);
+            if (result) await InvalidateCacheAsync();
+            return result;
         }
-        catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+        catch (InvalidOperationException ex)
         {
-            _logger.LogWarning(ex, "药品编号重复: {DrugId}", drug.DrugId);
-            return DrugOperationResult.Fail($"药品编号 {drug.DrugId} 已存在", DrugOperationError.DuplicateKey);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "新增药品失败: {DrugId}", drug.DrugId);
-            return DrugOperationResult.Fail("数据库写入失败", DrugOperationError.DatabaseError);
-        }
-    }
-
-    public async Task<DrugOperationResult> DeleteDrugAsync(string drugId)
-    {
-        if (string.IsNullOrWhiteSpace(drugId))
-        {
-            return DrugOperationResult.Fail("药品编号不能为空", DrugOperationError.ValidationFailed);
-        }
-
-        try
-        {
-            var drug = await _context.Drugs.FirstOrDefaultAsync(x => x.DrugId == drugId);
-            if (drug == null)
-            {
-                return DrugOperationResult.Fail($"未找到编号为 {drugId} 的药品", DrugOperationError.NotFound);
-            }
-
-            _context.Drugs.Remove(drug);
-            await _context.SaveChangesAsync();
-            await InvalidateCacheAsync();
-
-            return DrugOperationResult.Ok("药品下架成功");
+            _logger.LogWarning(ex, "删除药品被拒绝: {DrugId}", drugId);
+            throw; // Propagate business-rule violation to controller
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "删除药品失败: {DrugId}", drugId);
-            return DrugOperationResult.Fail("删除操作失败", DrugOperationError.DatabaseError);
+            return false;
         }
     }
 
@@ -150,9 +144,18 @@ public class DrugService
         }
     }
 
-    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    private static DrugDto MapToDto(DrugCatalogEntity entity) => new()
     {
-        var message = ex.InnerException?.Message ?? ex.Message;
-        return message.Contains("Duplicate", StringComparison.OrdinalIgnoreCase);
-    }
+        DrugId = entity.DrugId,
+        DrugName = entity.DrugName,
+        TradeName = entity.TradeName,
+        Specification = entity.Specification,
+        DosageForm = entity.DosageForm,
+        ApprovalNum = entity.ApprovalNum,
+        StorageCond = entity.StorageCond,
+        PurchasePrice = entity.PurchasePrice,
+        RetailPrice = entity.RetailPrice,
+        StockQuantity = entity.StockQuantity,
+        SupplierId = entity.SupplierId
+    };
 }

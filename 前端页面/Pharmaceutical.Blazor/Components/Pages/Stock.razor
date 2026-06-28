@@ -1,0 +1,165 @@
+@page "/stock"
+@rendermode InteractiveServer
+@inject StockApiService StockApi
+@inject DrugApiService DrugApi
+@inject AuthStateService AuthState
+
+<PageTitle>库存流水 - 药品管理综合系统</PageTitle>
+
+<div class="page-header">
+    <h1>入库 / 出库管理</h1>
+    <p class="page-subtitle">记录库存变动并查看流水明细</p>
+</div>
+
+<AlertBanner Message="@_message" IsError="@_messageIsError" OnClose="() => _message = null" />
+
+@if (AuthState.CanOperate)
+{
+    <div class="card">
+        <div class="card-header"><h2>库存操作</h2></div>
+        <div class="card-body">
+            <div class="stock-forms">
+                <EditForm Model="_stockIn" OnValidSubmit="HandleStockIn" class="stock-form-card">
+                    <h3>入库</h3>
+                    <div class="form-group">
+                        <label>药品</label>
+                        <InputSelect @bind-Value="_stockIn.DrugId" class="form-control">
+                            <option value="">请选择</option>
+                            @foreach (var d in _drugs)
+                            {
+                                <option value="@d.DrugId">@d.DrugName (@d.DrugId)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="form-group">
+                        <label>数量</label>
+                        <InputNumber @bind-Value="_stockIn.Quantity" class="form-control" />
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <InputText @bind-Value="_stockIn.Remark" class="form-control" />
+                    </div>
+                    <button type="submit" class="btn btn-primary" disabled="@_submitting">确认入库</button>
+                </EditForm>
+
+                <EditForm Model="_stockOut" OnValidSubmit="HandleStockOut" class="stock-form-card">
+                    <h3>出库</h3>
+                    <div class="form-group">
+                        <label>药品</label>
+                        <InputSelect @bind-Value="_stockOut.DrugId" class="form-control">
+                            <option value="">请选择</option>
+                            @foreach (var d in _drugs)
+                            {
+                                <option value="@d.DrugId">@d.DrugName (库存:@d.StockQuantity)</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="form-group">
+                        <label>数量</label>
+                        <InputNumber @bind-Value="_stockOut.Quantity" class="form-control" />
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <InputText @bind-Value="_stockOut.Remark" class="form-control" />
+                    </div>
+                    <button type="submit" class="btn btn-danger" disabled="@_submitting">确认出库</button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="card-header toolbar">
+        <h2>流水记录</h2>
+        <button class="btn btn-secondary btn-sm" @onclick="LoadData" disabled="@_loading">刷新</button>
+    </div>
+    <div class="card-body table-wrapper">
+        <LoadingSpinner IsLoading="@_loading" />
+        @if (!_loading && _transactions.Any())
+        {
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>时间</th>
+                        <th>药品</th>
+                        <th>类型</th>
+                        <th>数量</th>
+                        <th>操作人</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _transactions)
+                    {
+                        <tr>
+                            <td>@t.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@t.DrugName (@t.DrugId)</td>
+                            <td>
+                                <span class="badge @(t.TransactionType == "IN" ? "badge-success" : "badge-danger")">
+                                    @(t.TransactionType == "IN" ? "入库" : "出库")
+                                </span>
+                            </td>
+                            <td>@t.Quantity</td>
+                            <td>@t.Operator</td>
+                            <td>@t.Remark</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else if (!_loading)
+        {
+            <div class="empty-state">暂无流水记录</div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<StockTransactionDto> _transactions = new();
+    private List<DrugDto> _drugs = new();
+    private StockInDto _stockIn = new();
+    private StockOutDto _stockOut = new();
+    private string? _message;
+    private bool _messageIsError;
+    private bool _loading = true;
+    private bool _submitting;
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        try
+        {
+            _transactions = await StockApi.GetTransactionsAsync();
+            var (data, _) = await DrugApi.GetPagedAsync(null, 1, 500);
+            _drugs = data?.Items ?? new();
+        }
+        finally { _loading = false; }
+    }
+
+    private async Task HandleStockIn()
+    {
+        if (string.IsNullOrEmpty(_stockIn.DrugId)) return;
+        _submitting = true;
+        _stockIn.Operator = AuthState.DisplayName ?? AuthState.Username;
+        var (success, msg) = await StockApi.StockInAsync(_stockIn);
+        _message = msg;
+        _messageIsError = !success;
+        if (success) { _stockIn = new(); await LoadData(); }
+        _submitting = false;
+    }
+
+    private async Task HandleStockOut()
+    {
+        if (string.IsNullOrEmpty(_stockOut.DrugId)) return;
+        _submitting = true;
+        _stockOut.Operator = AuthState.DisplayName ?? AuthState.Username;
+        var (success, msg) = await StockApi.StockOutAsync(_stockOut);
+        _message = msg;
+        _messageIsError = !success;
+        if (success) { _stockOut = new(); await LoadData(); }
+        _submitting = false;
+    }
+}
