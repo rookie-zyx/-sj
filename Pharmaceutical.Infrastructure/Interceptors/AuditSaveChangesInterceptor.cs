@@ -55,10 +55,10 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
             string? newValues = null;
 
             if (entry.State == EntityState.Modified || entry.State == EntityState.Deleted)
-                oldValues = JsonSerializer.Serialize(entry.OriginalValues.ToObject());
+                oldValues = TrySerialize(entry.OriginalValues.ToObject());
 
             if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
-                newValues = JsonSerializer.Serialize(entry.CurrentValues.ToObject());
+                newValues = TrySerialize(entry.CurrentValues.ToObject());
 
             context.Set<AuditLogEntity>().Add(new AuditLogEntity
             {
@@ -79,5 +79,18 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
         if (key == null) return "unknown";
         var values = key.Properties.Select(p => entry.Property(p.Name).CurrentValue?.ToString() ?? "");
         return string.Join("-", values);
+    }
+
+    private static string? TrySerialize(object? value)
+    {
+        if (value == null) return null;
+        try
+        {
+            return JsonSerializer.Serialize(value);
+        }
+        catch
+        {
+            return value.ToString();
+        }
     }
 }

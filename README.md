@@ -43,7 +43,10 @@ docker compose up -d --build
 | WebAPI | http://localhost:5246 |
 | 健康检查 | http://localhost:5246/health |
 
-默认账号：`admin` / `Admin@123`
+默认账号：`admin` / `Admin@123`  
+演示账号（种子自动创建）：`operator1` / `Operator@123`，`viewer1` / `Viewer@123`
+
+详细手动步骤见 [docs/MANUAL-STEPS.md](docs/MANUAL-STEPS.md)。
 
 停止服务：`docker compose down` · 清除数据卷：`docker compose down -v`
 

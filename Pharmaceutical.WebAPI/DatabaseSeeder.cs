@@ -45,7 +45,56 @@ public static class DatabaseSeeder
             || string.Equals(Environment.GetEnvironmentVariable("SEED_DEMO_DATA"), "true", StringComparison.OrdinalIgnoreCase);
 
         if (seedDemo)
+        {
+            await SeedDemoUsersAsync(userManager);
             await SeedDemoDataAsync(context);
+            await SeedDemoPurchaseOrderAsync(context);
+        }
+    }
+
+    private static async Task SeedDemoUsersAsync(UserManager<AppUser> userManager)
+    {
+        await EnsureUserAsync(userManager, "operator1", "Operator@123", "演示操作员", "Operator");
+        await EnsureUserAsync(userManager, "viewer1", "Viewer@123", "演示只读", "Viewer");
+    }
+
+    private static async Task EnsureUserAsync(
+        UserManager<AppUser> userManager, string username, string password, string displayName, string role)
+    {
+        if (await userManager.FindByNameAsync(username) != null) return;
+        var user = new AppUser { UserName = username, DisplayName = displayName };
+        var result = await userManager.CreateAsync(user, password);
+        if (result.Succeeded)
+            await userManager.AddToRoleAsync(user, role);
+    }
+
+    private static async Task SeedDemoPurchaseOrderAsync(PharmaceuticalDbContext context)
+    {
+        if (await context.PurchaseOrders.AnyAsync()) return;
+
+        var supplier = await context.Suppliers.OrderBy(s => s.SupplierId).FirstOrDefaultAsync();
+        var lowStockDrugs = await context.Drugs
+            .Where(d => d.IsActive && d.StockQuantity < 200 && d.SupplierId == supplier!.SupplierId)
+            .Take(3)
+            .ToListAsync();
+        if (supplier == null || lowStockDrugs.Count == 0) return;
+
+        var order = new PurchaseOrderEntity
+        {
+            SupplierId = supplier.SupplierId,
+            Status = PurchaseOrderStatus.Draft,
+            CreatedBy = "admin",
+            CreatedAt = DateTime.UtcNow,
+            Lines = lowStockDrugs.Select(d => new PurchaseOrderLineEntity
+            {
+                DrugId = d.DrugId,
+                Quantity = Math.Max(200 - d.StockQuantity, 10),
+                ReceivedQuantity = 0
+            }).ToList()
+        };
+        context.PurchaseOrders.Add(order);
+        await context.SaveChangesAsync();
+        Console.WriteLine("演示数据：已创建草稿采购单（可在采购单页提交审核）。");
     }
 
     private static async Task SeedDemoDataAsync(PharmaceuticalDbContext context)
