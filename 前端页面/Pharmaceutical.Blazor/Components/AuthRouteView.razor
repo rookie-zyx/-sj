@@ -1,0 +1,32 @@
+@inject AuthStateService AuthState
+@inject NavigationManager Navigation
+
+@if (_ready)
+{
+    @if (_allowAccess)
+    {
+        <RouteView RouteData="RouteData" DefaultLayout="DefaultLayout" />
+        <FocusOnNavigate RouteData="RouteData" Selector="h1" />
+    }
+}
+
+@code {
+    [Parameter] public RouteData RouteData { get; set; } = default!;
+    [Parameter] public Type? DefaultLayout { get; set; }
+
+    private bool _ready;
+    private bool _allowAccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await AuthState.WhenInitialized;
+        var pageType = RouteData.PageType;
+        var isLoginPage = pageType?.Name == "Login";
+        _allowAccess = isLoginPage || AuthState.IsAuthenticated;
+
+        if (!isLoginPage && !AuthState.IsAuthenticated)
+            Navigation.NavigateTo("/login", forceLoad: true);
+
+        _ready = true;
+    }
+}

@@ -435,6 +435,67 @@ code {
     text-align: center;
 }
 
+.stat-primary {
+    color: var(--color-primary);
+    font-size: 1.75rem;
+}
+
+.workflow-line {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+}
+
+.filter-bar,
+.quick-links,
+.filter-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.filter-select {
+    max-width: 160px;
+    min-width: 120px;
+}
+
+.filter-tabs {
+    margin-bottom: 1rem;
+}
+
+.badge-warning {
+    background: #f59e0b;
+    color: #fff;
+}
+
+.badge-secondary {
+    background: #94a3b8;
+    color: #fff;
+}
+
+.chart-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.chart-card .chart-container {
+    height: 280px;
+    position: relative;
+}
+
+.audit-cell pre {
+    font-size: 0.75rem;
+    max-height: 120px;
+    overflow: auto;
+    background: var(--color-bg);
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin: 0.25rem 0;
+}
+
 .stat-info h2 {
     font-size: 1.1rem;
     margin-bottom: 0.25rem;

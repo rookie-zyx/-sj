@@ -43,5 +43,11 @@ namespace Pharmaceutical.Core
 
         [Column("supplier_id")]
         public int SupplierId { get; set; }
+
+        [Column("is_active")]
+        public bool IsActive { get; set; } = true;
+
+        public SupplierEntity? Supplier { get; set; }
+        public List<DrugBatchEntity> Batches { get; set; } = new();
     }
 }

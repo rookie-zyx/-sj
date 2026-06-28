@@ -361,3 +361,10 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local development secrets (use *.example.json as template)
+**/appsettings.Development.json
+!**/appsettings.Development.example.json
+
+# Docker local secrets
+.env

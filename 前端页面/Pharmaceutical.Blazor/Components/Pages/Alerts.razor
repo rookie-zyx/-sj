@@ -1,6 +1,8 @@
 @page "/alerts"
 @rendermode InteractiveServer
 @inject DrugApiService DrugApi
+@inject ExportApiService ExportApi
+@inject IJSRuntime JS
 
 <PageTitle>库存预警 - 药品管理综合系统</PageTitle>
 
@@ -30,7 +32,11 @@ else
     <div class="card">
         <div class="card-header toolbar">
             <h2>预警明细</h2>
-            <button class="btn btn-secondary btn-sm" @onclick="LoadAlerts">刷新</button>
+            <div class="toolbar-actions">
+                <a href="/purchase-orders" class="btn btn-primary btn-sm">去创建采购单</a>
+                <button class="btn btn-secondary btn-sm" @onclick="ExportLowStock" disabled="@_exporting">导出 CSV</button>
+                <button class="btn btn-secondary btn-sm" @onclick="LoadAlerts">刷新</button>
+            </div>
         </div>
         <div class="card-body table-wrapper">
             @if (!_lowStockDrugs.Any())
@@ -48,7 +54,7 @@ else
                             <th>药品名称</th>
                             <th>规格</th>
                             <th>当前库存</th>
-                            <th>供应商 ID</th>
+                            <th>供应商</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -58,7 +64,7 @@ else
                                 <td>@drug.DrugName</td>
                                 <td>@drug.Specification</td>
                                 <td class="text-danger fw-bold">@drug.StockQuantity</td>
-                                <td>@drug.SupplierId</td>
+                                <td>@drug.SupplierName</td>
                             </tr>
                         }
                     </tbody>
@@ -73,6 +79,7 @@ else
     private bool _loading = true;
     private string? _loadError;
     private int _threshold = 200;
+    private bool _exporting;
 
     protected override async Task OnInitializedAsync() => await LoadAlerts();
 
@@ -97,5 +104,14 @@ else
         {
             _loading = false;
         }
+    }
+
+    private async Task ExportLowStock()
+    {
+        _exporting = true;
+        var bytes = await ExportApi.DownloadLowStockAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("downloadFileFromBytes", "low-stock.csv", Convert.ToBase64String(bytes));
+        _exporting = false;
     }
 }

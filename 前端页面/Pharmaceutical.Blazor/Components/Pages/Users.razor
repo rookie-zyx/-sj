@@ -1,0 +1,55 @@
+@page "/users"
+@rendermode InteractiveServer
+@inject AuthApiService AuthApi
+@inject AuthStateService AuthState
+
+<PageTitle>用户管理</PageTitle>
+
+@if (!AuthState.IsAdmin)
+{
+    <p>需要管理员权限</p>
+}
+else
+{
+    <div class="page-header">
+        <h1>用户管理</h1>
+        <p class="page-subtitle">创建系统用户并分配角色</p>
+    </div>
+
+    <AlertBanner Message="@_message" IsError="@_messageIsError" OnClose="() => _message = null" />
+
+    <div class="card">
+        <div class="card-header"><h2>注册新用户</h2></div>
+        <div class="card-body">
+            <EditForm Model="_model" OnValidSubmit="HandleRegister">
+                <div class="form-grid">
+                    <div class="form-group"><label>用户名</label><InputText @bind-Value="_model.Username" class="form-control" /></div>
+                    <div class="form-group"><label>密码</label><InputText type="password" @bind-Value="_model.Password" class="form-control" /></div>
+                    <div class="form-group"><label>显示名</label><InputText @bind-Value="_model.DisplayName" class="form-control" /></div>
+                    <div class="form-group">
+                        <label>角色</label>
+                        <InputSelect @bind-Value="_model.Role" class="form-control">
+                            <option value="Viewer">Viewer</option>
+                            <option value="Operator">Operator</option>
+                            <option value="Admin">Admin</option>
+                        </InputSelect>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">创建用户</button>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@code {
+    private RegisterDto _model = new();
+    private string? _message;
+    private bool _messageIsError;
+
+    private async Task HandleRegister()
+    {
+        var (ok, msg) = await AuthApi.RegisterAsync(_model);
+        _message = msg; _messageIsError = !ok;
+        if (ok) _model = new RegisterDto();
+    }
+}

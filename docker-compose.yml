@@ -35,13 +35,23 @@ services:
       - "5246:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__DefaultConnection: "server=mysql;user=root;database=${MYSQL_DATABASE:-pharmaceutical};port=3306;password=${MYSQL_ROOT_PASSWORD:-your_password};"
       ConnectionStrings__RedisConnection: "redis:6379"
+      JwtSettings__Secret: ${JWT_SECRET:-change-me-to-a-secure-random-key-at-least-32-chars}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+    restart: on-failure
 
   blazor:
     build:
@@ -52,9 +62,18 @@ services:
       - "5100:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
       ApiSettings__BaseUrl: "http://webapi:8080/"
+      DISABLE_HTTPS_REDIRECT: "true"
     depends_on:
-      - webapi
+      webapi:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   mysql_data:

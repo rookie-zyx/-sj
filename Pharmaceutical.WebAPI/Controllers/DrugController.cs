@@ -22,15 +22,13 @@ public class DrugController : ControllerBase
     }
 
     [HttpGet]
-    [AllowAnonymous]
-    public async Task<IActionResult> GetDrugs([FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    public async Task<IActionResult> GetDrugs([FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, [FromQuery] bool? activeOnly = true)
     {
-        var result = await _drugService.GetPagedAsync(search, page, pageSize);
+        var result = await _drugService.GetPagedAsync(search, page, pageSize, activeOnly);
         return Ok(ApiResponse<PagedResult<DrugDto>>.Ok(result));
     }
 
     [HttpGet("{id}")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetDrug(string id)
     {
         var drug = await _drugService.GetByIdAsync(id);
@@ -39,7 +37,6 @@ public class DrugController : ControllerBase
     }
 
     [HttpGet("low-stock")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetLowStock([FromQuery] int? threshold)
     {
         var effectiveThreshold = threshold ?? _alertSettings.LowStockThreshold;
@@ -48,11 +45,8 @@ public class DrugController : ControllerBase
     }
 
     [HttpGet("alert-settings")]
-    [AllowAnonymous]
-    public IActionResult GetAlertSettings()
-    {
-        return Ok(ApiResponse<AlertSettings>.Ok(_alertSettings));
-    }
+    public IActionResult GetAlertSettings() =>
+        Ok(ApiResponse<AlertSettings>.Ok(_alertSettings));
 
     [HttpPost]
     [Authorize(Roles = "Admin,Operator")]
@@ -74,17 +68,10 @@ public class DrugController : ControllerBase
 
     [HttpDelete("{id}")]
     [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> DeleteDrug(string id)
+    public async Task<IActionResult> DeactivateDrug(string id)
     {
-        try
-        {
-            var result = await _drugService.DeleteAsync(id);
-            if (!result) return NotFound(ApiResponse<object>.Fail($"未找到编号为 {id} 的药品"));
-            return Ok(ApiResponse<object>.Ok(null, "药品下架成功"));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Conflict(ApiResponse<object>.Fail(ex.Message));
-        }
+        var result = await _drugService.DeactivateAsync(id);
+        if (!result) return NotFound(ApiResponse<object>.Fail($"未找到编号为 {id} 的药品或已下架"));
+        return Ok(ApiResponse<object>.Ok(null, "药品下架成功"));
     }
 }

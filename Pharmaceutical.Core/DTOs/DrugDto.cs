@@ -13,6 +13,8 @@ public class DrugDto
     public decimal RetailPrice { get; set; }
     public int StockQuantity { get; set; }
     public int SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
 }
 
 public class DrugCreateDto
@@ -40,6 +42,5 @@ public class DrugUpdateDto
     public string? StorageCond { get; set; }
     public decimal PurchasePrice { get; set; }
     public decimal RetailPrice { get; set; }
-    public int StockQuantity { get; set; }
     public int SupplierId { get; set; }
 }

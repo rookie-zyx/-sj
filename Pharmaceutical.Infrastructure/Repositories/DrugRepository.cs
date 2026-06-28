@@ -14,9 +14,14 @@ public class DrugRepository : IDrugRepository
         _context = context;
     }
 
-    public async Task<PagedResult<DrugCatalogEntity>> GetPagedAsync(string? search, int page, int pageSize)
+    public async Task<PagedResult<DrugCatalogEntity>> GetPagedAsync(string? search, int page, int pageSize, bool? activeOnly = true)
     {
-        var query = _context.Drugs.AsQueryable();
+        var query = _context.Drugs.Include(d => d.Supplier).AsQueryable();
+
+        if (activeOnly == true)
+            query = query.Where(d => d.IsActive);
+        else if (activeOnly == false)
+            query = query.Where(d => !d.IsActive);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -43,10 +48,14 @@ public class DrugRepository : IDrugRepository
     }
 
     public async Task<DrugCatalogEntity?> GetByIdAsync(string drugId) =>
-        await _context.Drugs.FirstOrDefaultAsync(d => d.DrugId == drugId);
+        await _context.Drugs.Include(d => d.Supplier).FirstOrDefaultAsync(d => d.DrugId == drugId);
 
     public async Task<List<DrugCatalogEntity>> GetLowStockAsync(int threshold) =>
-        await _context.Drugs.Where(d => d.StockQuantity < threshold).OrderBy(d => d.StockQuantity).ToListAsync();
+        await _context.Drugs
+            .Include(d => d.Supplier)
+            .Where(d => d.IsActive && d.StockQuantity < threshold)
+            .OrderBy(d => d.StockQuantity)
+            .ToListAsync();
 
     public async Task<bool> AddAsync(DrugCatalogEntity drug)
     {
@@ -63,18 +72,12 @@ public class DrugRepository : IDrugRepository
         return await _context.SaveChangesAsync() > 0;
     }
 
-    public async Task<bool> DeleteAsync(string drugId)
+    public async Task<bool> DeactivateAsync(string drugId)
     {
         var drug = await GetByIdAsync(drugId);
-        if (drug == null) return false;
+        if (drug == null || !drug.IsActive) return false;
 
-        // Check for related stock transactions before deleting
-        var hasTransactions = await _context.StockTransactions
-            .AnyAsync(t => t.DrugId == drugId);
-        if (hasTransactions)
-            throw new InvalidOperationException("该药品存在库存流水记录，无法删除。请先下架或联系管理员。");
-
-        _context.Drugs.Remove(drug);
+        drug.IsActive = false;
         return await _context.SaveChangesAsync() > 0;
     }
 }

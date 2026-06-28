@@ -2,7 +2,9 @@
 @rendermode InteractiveServer
 @inject DrugApiService DrugApi
 @inject SupplierApiService SupplierApi
+@inject ExportApiService ExportApi
 @inject AuthStateService AuthState
+@inject IJSRuntime JS
 
 <PageTitle>药品台账 - 药品管理综合系统</PageTitle>
 
@@ -90,9 +92,15 @@
     <div class="card-header toolbar">
         <h2>药品列表</h2>
         <div class="toolbar-actions">
+            <InputSelect @bind-Value="_activeFilter" class="form-control filter-select" @bind-Value:after="OnActiveFilterChanged">
+                <option value="active">在售</option>
+                <option value="inactive">已下架</option>
+                <option value="all">全部</option>
+            </InputSelect>
             <input type="search" class="search-input" placeholder="搜索药品名称或编号..."
                    @bind="_searchText" @bind:event="oninput" @onkeyup="HandleSearchKeyUp" />
             <button class="btn btn-secondary btn-sm" @onclick="LoadDrugs" disabled="@_loading">刷新</button>
+            <button class="btn btn-secondary btn-sm" @onclick="ExportDrugs" disabled="@_exporting">导出 CSV</button>
         </div>
     </div>
     <div class="card-body table-wrapper">
@@ -135,15 +143,19 @@
                             <td class="@(isLowStock ? "text-danger fw-bold" : "")">@drug.StockQuantity</td>
                             <td>@drug.PurchasePrice.ToString("F2")</td>
                             <td>@drug.RetailPrice.ToString("F2")</td>
-                            <td>@GetSupplierName(drug.SupplierId)</td>
+                            <td>@(string.IsNullOrEmpty(drug.SupplierName) ? GetSupplierName(drug.SupplierId) : drug.SupplierName)</td>
                             <td>
-                                @if (isLowStock)
+                                @if (!drug.IsActive)
+                                {
+                                    <span class="badge badge-secondary">已下架</span>
+                                }
+                                else if (isLowStock)
                                 {
                                     <span class="badge badge-danger">低库存</span>
                                 }
                                 else
                                 {
-                                    <span class="badge badge-success">正常</span>
+                                    <span class="badge badge-success">在售</span>
                                 }
                             </td>
                             @if (AuthState.CanOperate || AuthState.IsAdmin)
@@ -153,7 +165,7 @@
                                     {
                                         <button class="btn btn-secondary btn-sm" @onclick="() => OpenEdit(drug)">编辑</button>
                                     }
-                                    @if (AuthState.IsAdmin)
+                                    @if (AuthState.IsAdmin && drug.IsActive)
                                     {
                                         <button class="btn btn-danger btn-sm" @onclick="() => ConfirmDelete(drug)"
                                                 disabled="@(_deletingId == drug.DrugId)">下架</button>
@@ -214,10 +226,7 @@
                         <label>零售价</label>
                         <InputNumber @bind-Value="_editDrug.RetailPrice" class="form-control" />
                     </div>
-                    <div class="form-group">
-                        <label>库存数量</label>
-                        <InputNumber @bind-Value="_editDrug.StockQuantity" class="form-control" />
-                    </div>
+                    <p class="text-muted">库存请通过「入库/出库」页面变更，不可直接编辑。</p>
                     <div class="form-group">
                         <label>供应商</label>
                         <InputSelect @bind-Value="_editDrug.SupplierId" class="form-control">
@@ -257,6 +266,8 @@
     private int _pageSize = 20;
     private int _totalCount;
     private int _lowStockThreshold = 200;
+    private string _activeFilter = "active";
+    private bool _exporting;
 
     protected override async Task OnInitializedAsync()
     {
@@ -269,6 +280,19 @@
     private string GetSupplierName(int supplierId) =>
         _suppliers.FirstOrDefault(s => s.SupplierId == supplierId)?.Name ?? supplierId.ToString();
 
+    private bool? GetActiveOnlyFilter() => _activeFilter switch
+    {
+        "active" => true,
+        "inactive" => false,
+        _ => null
+    };
+
+    private async Task OnActiveFilterChanged()
+    {
+        _page = 1;
+        await LoadDrugs();
+    }
+
     private async Task LoadDrugs()
     {
         _loading = true;
@@ -277,7 +301,7 @@
 
         try
         {
-            var (data, error) = await DrugApi.GetPagedAsync(_searchText, _page, _pageSize);
+            var (data, error) = await DrugApi.GetPagedAsync(_searchText, _page, _pageSize, GetActiveOnlyFilter());
             if (data != null)
             {
                 _drugs = data.Items;
@@ -352,7 +376,6 @@
             StorageCond = drug.StorageCond,
             PurchasePrice = drug.PurchasePrice,
             RetailPrice = drug.RetailPrice,
-            StockQuantity = drug.StockQuantity,
             SupplierId = drug.SupplierId
         };
     }
@@ -403,5 +426,15 @@
             _deletingId = null;
             _deleteTarget = null;
         }
+    }
+
+    private async Task ExportDrugs()
+    {
+        _exporting = true;
+        var bytes = await ExportApi.DownloadDrugsAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("downloadFileFromBytes", "drugs.csv", Convert.ToBase64String(bytes));
+        else { _message = "导出失败"; _messageIsError = true; }
+        _exporting = false;
     }
 }

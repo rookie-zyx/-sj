@@ -34,6 +34,13 @@ public class AuthApiService
     }
 
     public async Task LogoutAsync() => await _authState.ClearAsync();
+
+    public async Task<(bool Success, string Message)> RegisterAsync(RegisterDto dto)
+    {
+        var response = await _httpClient.PostAsJsonAsync("api/auth/register", dto);
+        var (success, _, message) = await ApiClientHelper.GetApiData<object>(response);
+        return (success, message ?? (success ? "用户创建成功" : "创建失败"));
+    }
 }
 
 public class DrugApiService
@@ -45,9 +52,9 @@ public class DrugApiService
         _httpClient = httpClient;
     }
 
-    public async Task<(PagedResult<DrugDto>? Data, string? Error)> GetPagedAsync(string? search, int page, int pageSize)
+    public async Task<(PagedResult<DrugDto>? Data, string? Error)> GetPagedAsync(string? search, int page, int pageSize, bool? activeOnly = true)
     {
-        var url = $"api/drug?page={page}&pageSize={pageSize}";
+        var url = $"api/drug?page={page}&pageSize={pageSize}&activeOnly={activeOnly}";
         if (!string.IsNullOrWhiteSpace(search))
             url += $"&search={Uri.EscapeDataString(search)}";
 
@@ -135,15 +142,22 @@ public class StockApiService
 {
     private readonly HttpClient _httpClient;
 
-    public StockApiService(HttpClient httpClient)
+    public StockApiService(HttpClient httpClient) => _httpClient = httpClient;
+
+    public async Task<(PagedResult<StockTransactionDto>? Data, string? Error)> GetTransactionsAsync(StockTransactionQueryDto query)
     {
-        _httpClient = httpClient;
+        var url = $"api/stock?page={query.Page}&pageSize={query.PageSize}";
+        if (!string.IsNullOrWhiteSpace(query.DrugId)) url += $"&drugId={Uri.EscapeDataString(query.DrugId)}";
+        if (!string.IsNullOrWhiteSpace(query.TransactionType)) url += $"&transactionType={query.TransactionType}";
+        var response = await _httpClient.GetAsync(url);
+        var (success, data, message) = await ApiClientHelper.GetApiData<PagedResult<StockTransactionDto>>(response);
+        return success ? (data, null) : (null, message);
     }
 
-    public async Task<List<StockTransactionDto>> GetTransactionsAsync()
+    public async Task<List<ExpiryAlertDto>> GetExpiryAlertsAsync(int withinDays = 90)
     {
-        var response = await _httpClient.GetAsync("api/stock");
-        var (success, data, _) = await ApiClientHelper.GetApiData<List<StockTransactionDto>>(response);
+        var response = await _httpClient.GetAsync($"api/stock/expiry-alerts?withinDays={withinDays}");
+        var (success, data, _) = await ApiClientHelper.GetApiData<List<ExpiryAlertDto>>(response);
         return success ? data ?? new() : new();
     }
 
@@ -159,5 +173,84 @@ public class StockApiService
         var response = await _httpClient.PostAsJsonAsync("api/stock/out", dto);
         var (success, _, message) = await ApiClientHelper.GetApiData<object>(response);
         return (success, message ?? (success ? "出库成功" : "出库失败"));
+    }
+}
+
+public class DashboardApiService
+{
+    private readonly HttpClient _httpClient;
+    public DashboardApiService(HttpClient httpClient) => _httpClient = httpClient;
+
+    public async Task<(DashboardDto? Data, string? Error)> GetDashboardAsync()
+    {
+        var response = await _httpClient.GetAsync("api/dashboard");
+        var (success, data, message) = await ApiClientHelper.GetApiData<DashboardDto>(response);
+        return success ? (data, null) : (null, message);
+    }
+}
+
+public class PurchaseOrderApiService
+{
+    private readonly HttpClient _httpClient;
+    public PurchaseOrderApiService(HttpClient httpClient) => _httpClient = httpClient;
+
+    public async Task<List<PurchaseOrderDto>> GetAllAsync()
+    {
+        var response = await _httpClient.GetAsync("api/purchaseorder");
+        var (success, data, _) = await ApiClientHelper.GetApiData<List<PurchaseOrderDto>>(response);
+        return success ? data ?? new() : new();
+    }
+
+    public async Task<(bool Success, string Message)> CreateFromLowStockAsync(int supplierId)
+    {
+        var response = await _httpClient.PostAsync($"api/purchaseorder/from-low-stock?supplierId={supplierId}", null);
+        var (success, _, message) = await ApiClientHelper.GetApiData<object>(response);
+        return (success, message ?? "");
+    }
+
+    public async Task SubmitAsync(int id) => await _httpClient.PostAsync($"api/purchaseorder/{id}/submit", null);
+    public async Task ApproveAsync(int id) => await _httpClient.PostAsync($"api/purchaseorder/{id}/approve", null);
+    public async Task ReceiveAsync(int id) => await _httpClient.PostAsync($"api/purchaseorder/{id}/receive", null);
+}
+
+public class ExportApiService
+{
+    private readonly HttpClient _httpClient;
+
+    public ExportApiService(HttpClient httpClient) => _httpClient = httpClient;
+
+    public async Task<byte[]?> DownloadDrugsAsync()
+    {
+        var response = await _httpClient.GetAsync("api/export/drugs");
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync() : null;
+    }
+
+    public async Task<byte[]?> DownloadTransactionsAsync(StockTransactionQueryDto query)
+    {
+        var url = $"api/export/transactions?page={query.Page}&pageSize={query.PageSize}";
+        if (!string.IsNullOrWhiteSpace(query.DrugId)) url += $"&drugId={Uri.EscapeDataString(query.DrugId)}";
+        if (!string.IsNullOrWhiteSpace(query.TransactionType)) url += $"&transactionType={query.TransactionType}";
+        var response = await _httpClient.GetAsync(url);
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync() : null;
+    }
+
+    public async Task<byte[]?> DownloadLowStockAsync()
+    {
+        var response = await _httpClient.GetAsync("api/export/low-stock");
+        return response.IsSuccessStatusCode ? await response.Content.ReadAsByteArrayAsync() : null;
+    }
+}
+
+public class AuditApiService
+{
+    private readonly HttpClient _httpClient;
+
+    public AuditApiService(HttpClient httpClient) => _httpClient = httpClient;
+
+    public async Task<List<AuditLogDto>> GetRecentAsync(int count = 100)
+    {
+        var response = await _httpClient.GetAsync($"api/audit?count={count}");
+        var (success, data, _) = await ApiClientHelper.GetApiData<List<AuditLogDto>>(response);
+        return success ? data ?? new() : new();
     }
 }

@@ -12,7 +12,7 @@ public class DrugService : IDrugService
     private readonly IDrugRepository _repository;
     private readonly IDistributedCache _cache;
     private readonly ILogger<DrugService> _logger;
-    private const string CacheKey = "AllDrugs";
+    private const string CacheKeyPrefix = "DrugsPaged:";
 
     public DrugService(IDrugRepository repository, IDistributedCache cache, ILogger<DrugService> logger)
     {
@@ -21,19 +21,46 @@ public class DrugService : IDrugService
         _logger = logger;
     }
 
-    public async Task<PagedResult<DrugDto>> GetPagedAsync(string? search, int page, int pageSize)
+    public async Task<PagedResult<DrugDto>> GetPagedAsync(string? search, int page, int pageSize, bool? activeOnly = true)
     {
         page = page < 1 ? 1 : page;
         pageSize = pageSize is < 1 or > 100 ? 20 : pageSize;
 
-        var result = await _repository.GetPagedAsync(search, page, pageSize);
-        return new PagedResult<DrugDto>
+        var cacheKey = $"{CacheKeyPrefix}{search}:{page}:{pageSize}:{activeOnly}";
+        try
+        {
+            var cached = await _cache.GetStringAsync(cacheKey);
+            if (!string.IsNullOrEmpty(cached))
+            {
+                var cachedResult = JsonSerializer.Deserialize<PagedResult<DrugDto>>(cached);
+                if (cachedResult != null) return cachedResult;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Redis read failed for drug paging");
+        }
+
+        var result = await _repository.GetPagedAsync(search, page, pageSize, activeOnly);
+        var dto = new PagedResult<DrugDto>
         {
             Items = result.Items.Select(MapToDto).ToList(),
             TotalCount = result.TotalCount,
             Page = result.Page,
             PageSize = result.PageSize
         };
+
+        try
+        {
+            await _cache.SetStringAsync(cacheKey, JsonSerializer.Serialize(dto),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5) });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Redis write failed for drug paging");
+        }
+
+        return dto;
     }
 
     public async Task<DrugDto?> GetByIdAsync(string drugId)
@@ -65,7 +92,8 @@ public class DrugService : IDrugService
             PurchasePrice = dto.PurchasePrice,
             RetailPrice = dto.RetailPrice,
             StockQuantity = dto.StockQuantity,
-            SupplierId = dto.SupplierId
+            SupplierId = dto.SupplierId,
+            IsActive = true
         };
 
         try
@@ -96,7 +124,6 @@ public class DrugService : IDrugService
         entity.StorageCond = dto.StorageCond ?? string.Empty;
         entity.PurchasePrice = dto.PurchasePrice;
         entity.RetailPrice = dto.RetailPrice;
-        entity.StockQuantity = dto.StockQuantity;
         entity.SupplierId = dto.SupplierId;
 
         try
@@ -112,36 +139,25 @@ public class DrugService : IDrugService
         }
     }
 
-    public async Task<bool> DeleteAsync(string drugId)
+    public async Task<bool> DeactivateAsync(string drugId)
     {
         try
         {
-            var result = await _repository.DeleteAsync(drugId);
+            var result = await _repository.DeactivateAsync(drugId);
             if (result) await InvalidateCacheAsync();
             return result;
         }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogWarning(ex, "删除药品被拒绝: {DrugId}", drugId);
-            throw; // Propagate business-rule violation to controller
-        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "删除药品失败: {DrugId}", drugId);
+            _logger.LogError(ex, "下架药品失败: {DrugId}", drugId);
             return false;
         }
     }
 
     private async Task InvalidateCacheAsync()
     {
-        try
-        {
-            await _cache.RemoveAsync(CacheKey);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Redis 缓存清理失败");
-        }
+        try { await _cache.RemoveAsync("AllDrugs"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Redis cache clear failed"); }
     }
 
     private static DrugDto MapToDto(DrugCatalogEntity entity) => new()
@@ -156,6 +172,8 @@ public class DrugService : IDrugService
         PurchasePrice = entity.PurchasePrice,
         RetailPrice = entity.RetailPrice,
         StockQuantity = entity.StockQuantity,
-        SupplierId = entity.SupplierId
+        SupplierId = entity.SupplierId,
+        SupplierName = entity.Supplier?.Name ?? string.Empty,
+        IsActive = entity.IsActive
     };
 }

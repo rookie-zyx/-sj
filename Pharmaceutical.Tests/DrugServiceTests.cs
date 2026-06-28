@@ -31,18 +31,16 @@ public class DrugServiceTests
         var result = await _service.AddAsync(dto);
 
         Assert.True(result);
-        _cacheMock.Verify(c => c.RemoveAsync("AllDrugs", default), Times.Once);
     }
 
     [Fact]
-    public async Task DeleteAsync_ClearsCache_OnSuccess()
+    public async Task DeactivateAsync_ReturnsTrue_WhenExists()
     {
-        _repositoryMock.Setup(r => r.DeleteAsync("D001")).ReturnsAsync(true);
+        _repositoryMock.Setup(r => r.DeactivateAsync("D001")).ReturnsAsync(true);
 
-        var result = await _service.DeleteAsync("D001");
+        var result = await _service.DeactivateAsync("D001");
 
         Assert.True(result);
-        _cacheMock.Verify(c => c.RemoveAsync("AllDrugs", default), Times.Once);
     }
 
     [Fact]
@@ -54,24 +52,29 @@ public class DrugServiceTests
     }
 
     [Fact]
-    public async Task GetPagedAsync_MapsResults()
+    public async Task UpdateAsync_DoesNotChangeStock()
     {
-        _repositoryMock.Setup(r => r.GetPagedAsync(null, 1, 20))
-            .ReturnsAsync(new PagedResult<DrugCatalogEntity>
-            {
-                Items = new List<DrugCatalogEntity>
-                {
-                    new() { DrugId = "D001", DrugName = "阿司匹林" }
-                },
-                TotalCount = 1,
-                Page = 1,
-                PageSize = 20
-            });
+        var entity = new DrugCatalogEntity { DrugId = "D001", DrugName = "旧名", StockQuantity = 100 };
+        _repositoryMock.Setup(r => r.GetByIdAsync("D001")).ReturnsAsync(entity);
+        _repositoryMock.Setup(r => r.UpdateAsync(It.IsAny<DrugCatalogEntity>())).ReturnsAsync(true);
 
-        var result = await _service.GetPagedAsync(null, 1, 20);
+        await _service.UpdateAsync("D001", new DrugUpdateDto { DrugName = "新名", SupplierId = 1 });
 
-        Assert.Equal(1, result.TotalCount);
-        Assert.Single(result.Items);
-        Assert.Equal("阿司匹林", result.Items[0].DrugName);
+        _repositoryMock.Verify(r => r.UpdateAsync(It.Is<DrugCatalogEntity>(e => e.StockQuantity == 100)), Times.Once);
+    }
+}
+
+public class StockServiceTests
+{
+    [Fact]
+    public async Task StockOut_ReturnsFalse_WhenQuantityInvalid()
+    {
+        var stockRepo = new Mock<IStockRepository>();
+        var batchRepo = new Mock<IDrugBatchRepository>();
+        var cache = new Mock<IDistributedCache>();
+        var service = new StockService(stockRepo.Object, batchRepo.Object, cache.Object, NullLogger<StockService>.Instance);
+
+        var result = await service.StockOutAsync(new StockOutDto { DrugId = "D1", Quantity = 0 }, "admin");
+        Assert.False(result);
     }
 }

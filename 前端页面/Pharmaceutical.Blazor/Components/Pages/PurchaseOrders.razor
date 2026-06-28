@@ -1,0 +1,130 @@
+@page "/purchase-orders"
+@rendermode InteractiveServer
+@inject PurchaseOrderApiService PoApi
+@inject SupplierApiService SupplierApi
+@inject AuthStateService AuthState
+
+<PageTitle>采购单</PageTitle>
+
+<div class="page-header">
+    <h1>采购单管理</h1>
+    <p class="page-subtitle">低库存 → 采购单 → 审核 → 收货入库</p>
+</div>
+
+<AlertBanner Message="@_message" IsError="@_messageIsError" OnClose="() => _message = null" />
+
+@if (AuthState.CanOperate)
+{
+    <div class="card" style="margin-bottom:1rem">
+        <div class="card-body">
+            <label>从低库存一键生成：</label>
+            <InputSelect @bind-Value="_supplierId" class="form-control filter-select" style="display:inline-block">
+                @foreach (var s in _suppliers) { <option value="@s.SupplierId">@s.Name</option> }
+            </InputSelect>
+            <button class="btn btn-primary btn-sm" @onclick="CreateFromLowStock" disabled="@_submitting">生成采购单</button>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="card-header toolbar">
+        <h2>采购单列表</h2>
+        <button class="btn btn-secondary btn-sm" @onclick="Load" disabled="@_loading">刷新</button>
+    </div>
+    <div class="card-body table-wrapper">
+        @if (_loading) { <LoadingSpinner IsLoading="true" /> }
+        else if (!_orders.Any())
+        {
+            <div class="empty-state">暂无采购单</div>
+        }
+        else
+        {
+            <table class="data-table">
+                <thead><tr><th>单号</th><th>供应商</th><th>状态</th><th>明细</th><th>创建人</th><th>操作</th></tr></thead>
+                <tbody>
+                    @foreach (var o in _orders)
+                    {
+                        <tr>
+                            <td>#@o.OrderId</td>
+                            <td>@o.SupplierName</td>
+                            <td><span class="badge @GetStatusBadge(o.Status)">@GetStatusLabel(o.Status)</span></td>
+                            <td>@string.Join("、", o.Lines.Select(l => $"{l.DrugName}×{l.Quantity}"))</td>
+                            <td>@o.CreatedBy</td>
+                            <td class="action-cell">
+                                @if (o.Status == "Draft" && AuthState.CanOperate)
+                                {
+                                    <button class="btn btn-sm btn-secondary" @onclick="() => Submit(o.OrderId)" disabled="@_submitting">提交</button>
+                                }
+                                @if (o.Status == "Pending" && AuthState.IsAdmin)
+                                {
+                                    <button class="btn btn-sm btn-primary" @onclick="() => Approve(o.OrderId)" disabled="@_submitting">审核</button>
+                                }
+                                @if (o.Status == "Approved" && AuthState.CanOperate)
+                                {
+                                    <button class="btn btn-sm btn-primary" @onclick="() => Receive(o.OrderId)" disabled="@_submitting">收货入库</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+</div>
+
+@code {
+    private List<PurchaseOrderDto> _orders = new();
+    private List<SupplierDto> _suppliers = new();
+    private int _supplierId;
+    private string? _message;
+    private bool _messageIsError;
+    private bool _loading = true;
+    private bool _submitting;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _suppliers = await SupplierApi.GetAllAsync();
+        if (_suppliers.Any()) _supplierId = _suppliers[0].SupplierId;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _orders = await PoApi.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task CreateFromLowStock()
+    {
+        _submitting = true;
+        var (ok, msg) = await PoApi.CreateFromLowStockAsync(_supplierId);
+        _message = msg; _messageIsError = !ok;
+        if (ok) await Load();
+        _submitting = false;
+    }
+
+    private async Task Submit(int id) { _submitting = true; await PoApi.SubmitAsync(id); await Load(); _submitting = false; }
+    private async Task Approve(int id) { _submitting = true; await PoApi.ApproveAsync(id); await Load(); _submitting = false; }
+    private async Task Receive(int id) { _submitting = true; await PoApi.ReceiveAsync(id); await Load(); _submitting = false; }
+
+    private static string GetStatusLabel(string status) => status switch
+    {
+        "Draft" => "草稿",
+        "Pending" => "待审核",
+        "Approved" => "已审核",
+        "Received" => "已收货",
+        "Cancelled" => "已取消",
+        _ => status
+    };
+
+    private static string GetStatusBadge(string status) => status switch
+    {
+        "Draft" => "badge-secondary",
+        "Pending" => "badge-warning",
+        "Approved" => "badge-success",
+        "Received" => "badge-success",
+        _ => "badge-secondary"
+    };
+}
+

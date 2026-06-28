@@ -16,6 +16,9 @@
     }
 
     <nav class="sidebar-nav">
+        <NavLink href="/dashboard" class="nav-item">
+            <span class="nav-icon">▣</span> 运营仪表盘
+        </NavLink>
         <NavLink href="/" Match="NavLinkMatch.All" class="nav-item">
             <span class="nav-icon">⌂</span> 首页
         </NavLink>
@@ -25,6 +28,21 @@
         <NavLink href="/alerts" class="nav-item">
             <span class="nav-icon">!</span> 库存预警
         </NavLink>
+        <NavLink href="/expiry-alerts" class="nav-item">
+            <span class="nav-icon">⏱</span> 效期预警
+        </NavLink>
+        <NavLink href="/purchase-orders" class="nav-item">
+            <span class="nav-icon">📋</span> 采购单
+        </NavLink>
+        @if (AuthState.IsAdmin)
+        {
+            <NavLink href="/users" class="nav-item">
+                <span class="nav-icon">👤</span> 用户管理
+            </NavLink>
+            <NavLink href="/audit-logs" class="nav-item">
+                <span class="nav-icon">📜</span> 审计日志
+            </NavLink>
+        }
         <NavLink href="/suppliers" class="nav-item">
             <span class="nav-icon">◎</span> 供应商
         </NavLink>
@@ -44,15 +62,6 @@
     [Inject] private AuthStateService AuthState { get; set; } = default!;
     [Inject] private AuthApiService AuthApi { get; set; } = default!;
     [Inject] private NavigationManager Navigation { get; set; } = default!;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender)
-        {
-            await AuthState.InitializeAsync();
-            StateHasChanged();
-        }
-    }
 
     private async Task HandleLogout()
     {

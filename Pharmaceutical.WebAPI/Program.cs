@@ -7,32 +7,46 @@ using Pharmaceutical.Core;
 using Pharmaceutical.Core.Interfaces;
 using Pharmaceutical.Core.Settings;
 using Pharmaceutical.Infrastructure;
+using Pharmaceutical.Infrastructure.Interceptors;
 using Pharmaceutical.Infrastructure.Repositories;
 using Pharmaceutical.Services;
 using Pharmaceutical.WebAPI;
 using Pharmaceutical.WebAPI.Middleware;
 using Pharmaceutical.WebAPI.Validators;
+using Serilog;
 using System.Text;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
+
 var builder = WebApplication.CreateBuilder(args);
 
-// --- Settings ---
+builder.Host.UseSerilog((context, config) =>
+    config.ReadFrom.Configuration(context.Configuration)
+        .WriteTo.Console()
+        .Enrich.FromLogContext());
+
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection(JwtSettings.SectionName));
 builder.Services.Configure<AlertSettings>(
     builder.Configuration.GetSection(AlertSettings.SectionName));
 
-// --- DbContext ---
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 
 var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
-builder.Services.AddDbContext<PharmaceuticalDbContext>(options =>
-    options.UseMySql(connectionString, serverVersion));
 
-// --- Identity ---
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<AuditSaveChangesInterceptor>();
+builder.Services.AddDbContext<PharmaceuticalDbContext>((sp, options) =>
+{
+    options.UseMySql(connectionString, serverVersion);
+    options.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
+});
+
 builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
     {
         options.Password.RequireDigit = true;
@@ -44,7 +58,6 @@ builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
     .AddEntityFrameworkStores<PharmaceuticalDbContext>()
     .AddDefaultTokenProviders();
 
-// --- JWT Authentication ---
 var jwtSettings = builder.Configuration
     .GetSection(JwtSettings.SectionName)
     .Get<JwtSettings>()!;
@@ -71,7 +84,6 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// --- Redis Cache ---
 var redisConnection = builder.Configuration.GetConnectionString("RedisConnection");
 if (!string.IsNullOrWhiteSpace(redisConnection))
 {
@@ -85,28 +97,30 @@ else
     builder.Services.AddDistributedMemoryCache();
 }
 
-// --- Repositories & Services ---
 builder.Services.AddScoped<IDrugRepository, DrugRepository>();
+builder.Services.AddScoped<IDrugBatchRepository, DrugBatchRepository>();
 builder.Services.AddScoped<IStockRepository, StockRepository>();
 builder.Services.AddScoped<ISupplierRepository, SupplierRepository>();
+builder.Services.AddScoped<IPurchaseOrderRepository, PurchaseOrderRepository>();
+builder.Services.AddScoped<IAuditLogRepository, AuditLogRepository>();
+builder.Services.AddScoped<IAnalyticsRepository, AnalyticsRepository>();
+
 builder.Services.AddScoped<IDrugService, DrugService>();
 builder.Services.AddScoped<IStockService, StockService>();
 builder.Services.AddScoped<ISupplierService, SupplierService>();
+builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
+builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IExportService, ExportService>();
 
-// --- FluentValidation ---
 builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddValidatorsFromAssemblyContaining<DrugCreateDtoValidator>();
 
-// --- Controllers & Swagger ---
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "Pharmaceutical Management API",
-        Version = "v1"
-    });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Pharmaceutical Management API", Version = "v1" });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme",
@@ -121,23 +135,25 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
             },
             Array.Empty<string>()
         }
     });
 });
 
-// --- Health Checks ---
-builder.Services.AddHealthChecks()
-    .AddMySql(connectionString)
-    .AddRedis(redisConnection ?? "127.0.0.1:6379");
+var healthChecks = builder.Services.AddHealthChecks();
+if (builder.Environment.IsEnvironment("Testing"))
+{
+    healthChecks.AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy());
+}
+else
+{
+    healthChecks.AddMySql(connectionString);
+    if (!string.IsNullOrWhiteSpace(redisConnection))
+        healthChecks.AddRedis(redisConnection);
+}
 
-// --- CORS for Blazor client ---
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowBlazor", policy =>
@@ -151,16 +167,16 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// --- Database seeding ---
-await DatabaseSeeder.SeedAsync(app.Services);
+if (!app.Environment.IsEnvironment("Testing"))
+    await DatabaseSeeder.SeedAsync(app.Services);
 
-// --- Middleware pipeline ---
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
+app.UseSerilogRequestLogging();
 app.UseMiddleware<ExceptionMiddleware>();
 app.UseCors("AllowBlazor");
 app.UseAuthentication();

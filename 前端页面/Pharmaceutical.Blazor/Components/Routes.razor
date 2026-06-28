@@ -1,7 +1,6 @@
 ﻿<Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
-        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+        <AuthRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
     </Found>
     <NotFound>
         <PageTitle>未找到页面</PageTitle>
@@ -10,3 +9,19 @@
         </LayoutView>
     </NotFound>
 </Router>
+
+@code {
+    [Inject] private AuthStateService AuthState { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        AuthState.Unauthorized += OnUnauthorized;
+    }
+
+    private Task OnUnauthorized()
+    {
+        Navigation.NavigateTo("/login", forceLoad: true);
+        return Task.CompletedTask;
+    }
+}

@@ -18,7 +18,6 @@ public class SupplierController : ControllerBase
     }
 
     [HttpGet]
-    [AllowAnonymous]
     public async Task<IActionResult> GetSuppliers()
     {
         var suppliers = await _supplierService.GetAllAsync();
@@ -26,7 +25,6 @@ public class SupplierController : ControllerBase
     }
 
     [HttpGet("{id}")]
-    [AllowAnonymous]
     public async Task<IActionResult> GetSupplier(int id)
     {
         var supplier = await _supplierService.GetByIdAsync(id);

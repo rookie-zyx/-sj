@@ -243,6 +243,10 @@ namespace Pharmaceutical.Infrastructure.Migrations
                         .HasColumnType("longtext")
                         .HasColumnName("drug_name");
 
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("tinyint(1)")
+                        .HasColumnName("is_active");
+
                     b.Property<decimal>("PurchasePrice")
                         .HasColumnType("decimal(65,30)")
                         .HasColumnName("purchase_price");
@@ -276,7 +280,176 @@ namespace Pharmaceutical.Infrastructure.Migrations
 
                     b.HasKey("DrugId");
 
+                    b.HasIndex("SupplierId");
+
                     b.ToTable("drugs", (string)null);
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.DrugBatchEntity", b =>
+                {
+                    b.Property<int>("BatchId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("batch_id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("BatchId"));
+
+                    b.Property<string>("BatchNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("batch_number");
+
+                    b.Property<string>("DrugId")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("drug_id");
+
+                    b.Property<DateTime>("ExpiryDate")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("expiry_date");
+
+                    b.Property<DateTime?>("ManufactureDate")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("manufacture_date");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int")
+                        .HasColumnName("quantity");
+
+                    b.HasKey("BatchId");
+
+                    b.HasIndex("DrugId", "BatchNumber")
+                        .IsUnique();
+
+                    b.ToTable("drug_batches", (string)null);
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.AuditLogEntity", b =>
+                {
+                    b.Property<long>("AuditId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("audit_id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<long>("AuditId"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("action");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("entity_id");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("entity_type");
+
+                    b.Property<string>("NewValues")
+                        .HasColumnType("longtext")
+                        .HasColumnName("new_values");
+
+                    b.Property<string>("OldValues")
+                        .HasColumnType("longtext")
+                        .HasColumnName("old_values");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("user_name");
+
+                    b.HasKey("AuditId");
+
+                    b.ToTable("audit_logs", (string)null);
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.PurchaseOrderEntity", b =>
+                {
+                    b.Property<int>("OrderId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("order_id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("OrderId"));
+
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("approved_at");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("varchar(100)")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("varchar(20)")
+                        .HasColumnName("status");
+
+                    b.Property<int>("SupplierId")
+                        .HasColumnType("int")
+                        .HasColumnName("supplier_id");
+
+                    b.HasKey("OrderId");
+
+                    b.HasIndex("SupplierId");
+
+                    b.ToTable("purchase_orders", (string)null);
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.PurchaseOrderLineEntity", b =>
+                {
+                    b.Property<int>("LineId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("line_id");
+
+                    MySqlPropertyBuilderExtensions.UseMySqlIdentityColumn(b.Property<int>("LineId"));
+
+                    b.Property<string>("DrugId")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)")
+                        .HasColumnName("drug_id");
+
+                    b.Property<int>("OrderId")
+                        .HasColumnType("int")
+                        .HasColumnName("order_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int")
+                        .HasColumnName("quantity");
+
+                    b.Property<int>("ReceivedQuantity")
+                        .HasColumnType("int")
+                        .HasColumnName("received_quantity");
+
+                    b.HasKey("LineId");
+
+                    b.HasIndex("DrugId");
+
+                    b.HasIndex("OrderId");
+
+                    b.ToTable("purchase_order_lines", (string)null);
                 });
 
             modelBuilder.Entity("Pharmaceutical.Core.StockTransactionEntity", b =>
@@ -416,6 +589,58 @@ namespace Pharmaceutical.Infrastructure.Migrations
                         .IsRequired();
 
                     b.Navigation("Drug");
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.DrugBatchEntity", b =>
+                {
+                    b.HasOne("Pharmaceutical.Core.DrugCatalogEntity", "Drug")
+                        .WithMany("Batches")
+                        .HasForeignKey("DrugId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Drug");
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.DrugCatalogEntity", b =>
+                {
+                    b.HasOne("Pharmaceutical.Core.SupplierEntity", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.PurchaseOrderEntity", b =>
+                {
+                    b.HasOne("Pharmaceutical.Core.SupplierEntity", "Supplier")
+                        .WithMany()
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Supplier");
+                });
+
+            modelBuilder.Entity("Pharmaceutical.Core.PurchaseOrderLineEntity", b =>
+                {
+                    b.HasOne("Pharmaceutical.Core.DrugCatalogEntity", "Drug")
+                        .WithMany()
+                        .HasForeignKey("DrugId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Pharmaceutical.Core.PurchaseOrderEntity", "Order")
+                        .WithMany("Lines")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Drug");
+
+                    b.Navigation("Order");
                 });
 #pragma warning restore 612, 618
         }

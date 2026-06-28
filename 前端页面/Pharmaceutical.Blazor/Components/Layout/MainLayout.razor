@@ -1,14 +1,36 @@
 ﻿@inherits LayoutComponentBase
+@inject AuthStateService AuthState
 
-<div class="app-shell">
-    <NavMenu />
-    <main class="main-content">
-        @Body
-    </main>
-</div>
+@if (!_authReady)
+{
+    <div class="auth-loading">正在加载...</div>
+}
+else
+{
+    <div class="app-shell">
+        <NavMenu />
+        <main class="main-content">
+            @Body
+        </main>
+    </div>
+}
 
 <div id="blazor-error-ui" data-nosnippet>
     发生未处理的错误。
     <a href="." class="reload">重新加载</a>
     <span class="dismiss">×</span>
 </div>
+
+@code {
+    private bool _authReady;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await AuthState.InitializeAsync();
+            _authReady = true;
+            StateHasChanged();
+        }
+    }
+}

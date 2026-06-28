@@ -22,7 +22,6 @@ public class DrugUpdateDtoValidator : AbstractValidator<DrugUpdateDto>
         RuleFor(x => x.DrugName).NotEmpty().MaximumLength(200);
         RuleFor(x => x.PurchasePrice).GreaterThanOrEqualTo(0);
         RuleFor(x => x.RetailPrice).GreaterThanOrEqualTo(0);
-        RuleFor(x => x.StockQuantity).GreaterThanOrEqualTo(0);
     }
 }
 
